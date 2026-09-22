@@ -1197,7 +1197,8 @@ function renderMoves() {
   for (let i = 0; i < mv.length; i += 2) {
     const row = el('div', 'mv-row');
     row.appendChild(el('span', 'n', (i / 2 + 1) + '.'));
-    for (let j = i; j < Math.min(i + 2, mv.length); j++) {      const b = el('button', 'mv' + (j + 1 === cur ? ' cur' : ''), mv[j].san);
+    for (let j = i; j < Math.min(i + 2, mv.length); j++) {
+      const b = el('button', 'mv' + (j + 1 === cur ? ' cur' : ''), mv[j].san);
       b.type = 'button'; b.dataset.ply = String(j + 1);
       row.appendChild(b);
     }
@@ -1350,7 +1351,8 @@ $('#btnSound').addEventListener('click', () => {
 /* ═══════════════════════════════════════════════════════════
    Сеть (PeerJS / WebRTC), протокол и ход партии
    ═══════════════════════════════════════════════════════════ */
-const net = { peer: null, conn: null, gen: 0, ready: false, lastSeen: 0, hb: 0, retry: 0, openTimer: 0, guestToken: '', dialFails: 0, everOnline: false };
+const net = { peer: null, conn: null, gen: 0, ready: false, lastSeen: 0, hb: 0, retry: 0, openTimer: 0, watchdog: 0, guestToken: '', dialFails: 0, everOnline: false };
+const CONNECT_TIMEOUT = 8000;   // если сигнальный сервер не ответил open/error за это время — считаем попытку зависшей и пробуем снова
 
 /* ── Загрузка PeerJS ── */
 function loadScript(src) {
@@ -1676,6 +1678,11 @@ function openHost(attempt) {
   let rc = 0;
   const peer = new Peer(PEER_PREFIX + S.code, PEER_OPTIONS);
   net.peer = peer; net.ready = false;
+  net.watchdog = setTimeout(() => {
+    if (gen !== net.gen || net.ready) return;
+    setBanner('Сервер соединений не отвечает. Проверьте интернет — пробуем ещё раз…');
+    openHost(0);
+  }, CONNECT_TIMEOUT);
   peer.on('open', () => {
     if (gen !== net.gen) return;
     net.ready = true; rc = 0; setBanner(null); startHeartbeat();
@@ -1763,6 +1770,11 @@ function openGuest(attempt) {
   let rc = 0;
   const peer = new Peer(PEER_OPTIONS);
   net.peer = peer; net.ready = false;
+  net.watchdog = setTimeout(() => {
+    if (gen !== net.gen || net.ready) return;
+    setBanner('Сервер соединений не отвечает. Проверьте интернет — пробуем ещё раз…');
+    openGuest(0);
+  }, CONNECT_TIMEOUT);
   peer.on('open', () => { if (gen === net.gen) { net.ready = true; rc = 0; dial(gen); } });
   peer.on('disconnected', () => {
     if (gen !== net.gen) return;
@@ -1836,7 +1848,7 @@ function startHeartbeat() {
   }, 3000);
 }
 function dropPeer() {
-  clearInterval(net.hb); clearTimeout(net.retry); clearTimeout(net.openTimer);
+  clearInterval(net.hb); clearTimeout(net.retry); clearTimeout(net.openTimer); clearTimeout(net.watchdog);
   const { peer, conn } = net;
   net.peer = null; net.conn = null;
   try { if (conn) conn.close(); } catch { /* ничего */ }
